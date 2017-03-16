@@ -21,7 +21,7 @@ class Worker(Thread):
 
     def run(self):
         while True:
-            url, cur_depth = self.spider.tasks.get()
+            url, cur_depth = self.spider.queue_for_get.get()
             try:
                 if not self.spider.running:
                     continue
@@ -38,13 +38,13 @@ class Worker(Thread):
                     if href not in self.spider.queue_set:
                         print(item)
                         self.spider.queue_set.add(href)     # 解决重复入队列问题
-                        self.spider.tasks.put((href, h_depth))
+                        self.spider.queue_for_put.put((href, h_depth))
             except Exception as e:
                 self.spider.fail_set.add(url)
                 print(self.spider.fail_set)
                 print_exc()
             finally:
-                self.spider.tasks.task_done()
+                self.spider.queue_for_get.task_done()
 
 
 class ThreadSpider(BaseSpider):
@@ -52,7 +52,8 @@ class ThreadSpider(BaseSpider):
     def __init__(self, main_domain=None, domain=[], concurrent=10, max_depth=5, delay=1, keyword_list=[]):
         super(ThreadSpider, self).__init__(main_domain=main_domain, max_depth=max_depth,
                                            keyword_list=keyword_list, domain=domain)
-        self.tasks = Queue()
+        self.queue_for_get = Queue(concurrent)
+        self.queue_for_put = Queue()
         self.session = requests.session()
         self.session.headers = {
             'user-agent': self.USER_AGENT
@@ -67,14 +68,13 @@ class ThreadSpider(BaseSpider):
         if self.main_domain is None:
             self.main_domain = url
         self.domain_set.add(d)
-        self.tasks.put((url, 0))
+        self.queue_for_get.put((url, 0))
 
     def wait_completion(self):
-        self.tasks.join()   # todo: ctrl+c 终止不了此处的等待
-        # while True:
-        #     if self.tasks.empty():
-        #         break
-        #     time.sleep(1)
+        while self.running:
+            url, cur_depth = self.queue_for_put.get()
+            self.queue_for_get.put((url, cur_depth))
+        self.queue_for_get.join()   # todo: ctrl+c 终止不了此处的等待
 
 
 if __name__ == '__main__':

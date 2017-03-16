@@ -91,15 +91,24 @@ class BaseSpider(object):
         return [(item, cur_depth) for item in data.xpath('//*/@href')]
 
     def handle_sig(self, signum, frame):
-        print(';'*200)
         self.running = False
-        logging.error('pid={}, got signal: {}, stopping...'.format(os.getpid(), signal.Signals(signum).name))
+        logging.error('pid={}, got signal: {}, stopping...'.format(os.getpid(), signum))
         signal.signal(signal.SIGINT, self.handle_sig_force)
         signal.signal(signal.SIGTERM, self.handle_sig_force)
 
     def handle_sig_force(self, signum, frame):
         # self.running = False
-        logging.error('pid={}, got signal: {} again, forcing exit'.format(os.getpid(), signal.Signals(signum).name))
+        logging.error('pid={}, got signal: {} again, forcing exit'.format(os.getpid(), signum))
         time.sleep(1)
         os.kill(os.getpid(), signal.SIGKILL)
+
+
+class CrawlJob(object):
+
+    def __init__(self, url, reties_num=0):
+        self.url = url
+        self.reties_num = reties_num
+        self.text = ''
+        self.failed = False
+        self.next_url = []
 
