@@ -40,30 +40,28 @@ class BaseSpider(object):
 
     def need_crawl(self, href):
         """
-        检查href是否应该爬取, 检查事项: 1.域名, 2.是否爬取过, 3.爬取深度是否超限,
-        4.是否是图片,css,js链接(排除jpg,png,css,js,ico后缀的),
+        检查href是否应该爬取, 检查事项: 1.域名
+        2.是否是图片,css,js链接(排除jpg,png,css,js,ico后缀的),
           貌似可以用域名过滤掉, 一般cdn资源域名和内容域名不一样
-        5.检测是否是合法链接, 有可能需要合成链接
-        6.http://xxxxx#yyy, 应该去掉#yyy
+        3.检测是否是合法链接, 有可能需要合成链接
+        4.http://xxxxx#yyy, 应该去掉#yyy
         :param href: str, 待检查的链接
         :return:  bool, True-应该爬, False-不应该爬
                   str, 合成后的url
         """
-        url, cur_depath = href
-        if cur_depath > self.max_depth:
-            return False, (url, cur_depath)
+        url = href
         if url in self.done_set:
-            return False, (url, cur_depath)
+            return False, url
         if url.find('javascript:void(') != -1:
-            return False, (url, cur_depath)
+            return False, url
         params = urlparse(url)
         d = params.netloc
         if d != "" and d not in self.domain_set:
-            return False, (url, cur_depath)
+            return False, url
         if d != "":
-            return True, (self.clear_sharp(url), cur_depath)
+            return True, self.clear_sharp(url)
         else:
-            return True, (self.clear_sharp(urljoin(self.main_domain, url)), cur_depath)
+            return True, self.clear_sharp(urljoin(self.main_domain, url))
 
     def deal_href_list(self, href_list):
         """
@@ -79,16 +77,14 @@ class BaseSpider(object):
         return href_list_trans
         # return href_list
 
-    def extract_href_list(self, html_text, cur_depth):
+    def extract_href_list(self, html_text):
         """
         从html里抽取href链接数组
         :param html_text: str, 待处理的html
-        :param cur_depth: int, 这个url所处的深度
         :return: list: 从html里抽取出来的href列表
         """
-        cur_depth += 1
         data = etree.HTML(html_text)
-        return [(item, cur_depth) for item in data.xpath('//*/@href')]
+        return data.xpath('//*/@href')
 
     def handle_sig(self, signum, frame):
         self.running = False
@@ -105,10 +101,11 @@ class BaseSpider(object):
 
 class CrawlJob(object):
 
-    def __init__(self, url, reties_num=0):
+    def __init__(self, url, depth=0):
         self.url = url
-        self.reties_num = reties_num
+        self.depth = depth
+        self.failed_flag = False
         self.text = ''
-        self.failed = False
+        self.failed_num = 0
         self.next_url = []
 

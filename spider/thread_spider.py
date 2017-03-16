@@ -1,88 +1,114 @@
 # -*- coding:utf-8 -*-
 
 import time
-from Queue import Queue
+import os
+from Queue import Queue, Empty
+import threading
 from threading import Thread
 from traceback import print_exc
 from urlparse import urlparse
+import logging
+import datetime
 
 import requests
 
-from base_spider import BaseSpider
+from base_spider import BaseSpider, CrawlJob
 
 
 class Worker(Thread):
 
-    def __init__(self, spider):
+    def __init__(self, task_queue, result_queue):
         super(Worker, self).__init__()
-        self.spider = spider
+        self.task_queue = task_queue
+        self.result_queue = result_queue
         self.daemon = True
         self.start()
 
     def run(self):
         while True:
-            url, cur_depth = self.spider.queue_for_get.get()
             try:
-                if not self.spider.running:
-                    continue
-                if url in self.spider.done_set:     # 极有可能重复入队列，此处判断
-                    continue
-                resp = self.spider.session.get(url, timeout=10)
-                print('*=* ' * 10, url)
-                self.spider.done_set.add(url)       # 加入已爬取队列
-                time.sleep(self.spider.delay)
-                href_list = self.spider.extract_href_list(resp.text, cur_depth)
-                need_crawl_list = self.spider.deal_href_list(href_list)
-                for item in need_crawl_list:
-                    href, h_depth = item
-                    if href not in self.spider.queue_set:
-                        print(item)
-                        self.spider.queue_set.add(href)     # 解决重复入队列问题
-                        self.spider.queue_for_put.put((href, h_depth))
+                func, crawl_job = self.task_queue.get()
+                func(crawl_job)
             except Exception as e:
-                self.spider.fail_set.add(url)
-                print(self.spider.fail_set)
+                crawl_job.failed_flag = True
                 print_exc()
             finally:
-                self.spider.queue_for_get.task_done()
+                self.result_queue.put(crawl_job)
+                self.task_queue.task_done()
 
 
 class ThreadSpider(BaseSpider):
 
-    def __init__(self, main_domain=None, domain=[], concurrent=10, max_depth=5, delay=1, keyword_list=[]):
+    def __init__(self, main_domain=None, domain=[], concurrent=10, max_depth=5, max_retries=3, delay=1, keyword_list=[]):
         super(ThreadSpider, self).__init__(main_domain=main_domain, max_depth=max_depth,
                                            keyword_list=keyword_list, domain=domain)
-        self.queue_for_get = Queue(concurrent)
-        self.queue_for_put = Queue()
+        self.task_queue = Queue(concurrent)     # 发布任务用
+        self.result_queue = Queue()                # 线程返回结果用
         self.session = requests.session()
         self.session.headers = {
             'user-agent': self.USER_AGENT
         }
         self.delay = delay
+        self.max_retries = max_retries
         for _ in range(concurrent):
-            Worker(self)
+            Worker(self.task_queue, self.result_queue)
 
     def add_task(self, url):
         params = urlparse(target_url)
         d = params.netloc
         if self.main_domain is None:
-            self.main_domain = url
+            self.main_domain = url      # 设置主域名  todo：主域名称呼不对，若一开始初始化将主域名设置为别的，则所有合成的url都将是错的
         self.domain_set.add(d)
-        self.queue_for_get.put((url, 0))
+        crawl_job = CrawlJob(url)
+        self.task_queue.put((self.crawl, crawl_job))
 
-    def wait_completion(self):
+    def crawl(self, crawl_job):
+        url = crawl_job.url
+        if not self.running:
+            return
+        if url in self.done_set:     # 此处判断
+            return
+        resp = self.session.get(url, timeout=10)
+        print('*=* ' * 10, url)
+        self.done_set.add(url)       # 加入已爬取队列
+        crawl_job.text = resp.text
+        time.sleep(self.delay)
+
+    def run(self):
         while self.running:
-            url, cur_depth = self.queue_for_put.get()
-            self.queue_for_get.put((url, cur_depth))
-        self.queue_for_get.join()   # todo: ctrl+c 终止不了此处的等待
+            if self.task_queue.empty():
+                break
+            crawl_job = self.result_queue.get()
+            if crawl_job.failed_flag:
+                if crawl_job.failed_num <= self.max_retries:
+                    crawl_job.failed_num += 1
+                    crawl_job.failed_flag = False
+                    crawl_job.next_url = []
+                    self.task_queue.put((self.crawl, crawl_job))
+            else:
+                cur_depth = crawl_job.depth
+                cur_depth += 1
+                if cur_depth <= self.max_depth:
+                    href_list = self.extract_href_list(crawl_job.text)
+                    need_crawl_list = self.deal_href_list(href_list)
+                    for url in need_crawl_list:
+                        crawl_job.next_url.append(url)
+                    for i, url in enumerate(crawl_job.next_url):
+                        if url not in self.queue_set:
+                            print(i, '^%$', url, cur_depth, len(crawl_job.next_url), self.task_queue.maxsize)
+                            new_job = CrawlJob(url, cur_depth)
+                            self.task_queue.put((self.crawl, new_job))
+                            self.queue_set.add(url)
+                            # print(len(self.queue_set))
+        self.task_queue.join()
 
 
 if __name__ == '__main__':
     import time
     t1 = time.time()
     target_url = 'http://www.jianshu.com/'
-    ts = ThreadSpider(concurrent=1)
+    ts = ThreadSpider(concurrent=1, delay=1, max_depth=5)
     ts.add_task(target_url)
     # time.sleep(60)
-    ts.wait_completion()
+    ts.run()
     print(time.time() - t1)
