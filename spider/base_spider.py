@@ -26,7 +26,7 @@ class BaseSpider(object):
     USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_3) " \
                  "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36"
 
-    def __init__(self, main_domain=None, domain=[], max_depth=5, keyword_list=[], db_name='db2.sqlite'):
+    def __init__(self, main_domain=None, domain=[], max_depth=5, keyword_list=[], db_name='db/db.sqlite'):
         self.done_set = set()   # 已爬取过的set
         self.queue_set = set()  # 已经入过queue的set
         self.fail_set = set()   # 爬取失败的set
@@ -60,14 +60,16 @@ class BaseSpider(object):
     def clear_sharp(self, sstr):
         """去掉#号及其右边的内容"""
         if sstr.find('#') != -1:
-            return sstr[0: sstr.rfind('#')]
+            return sstr[0: sstr.rfind('#')]     # todo: 用urldefrag代替这个
         return sstr
 
     def deal_failed(self, crawl_job):
         self.fail_set.add(crawl_job.url)
         cursor = self.db_conn.cursor()
         sql = 'insert into failed_url (url, content, failed_reason) values (?, ?, ?)'
-        cursor.execute(sql, (crawl_job.url, crawl_job.text, crawl_job.failed_reason.decode('utf-8')))
+        failed_reason = crawl_job.failed_reason if isinstance(crawl_job.failed_reason, str) \
+                else crawl_job.failed_reason.decode()
+        cursor.execute(sql, (crawl_job.url, crawl_job.text, failed_reason))
         cursor.close()
         self.db_conn.commit()
 
@@ -119,9 +121,10 @@ class BaseSpider(object):
         return data.xpath('//*/@href')
 
     def save2db(self, url, content):
-        data = etree.HTML(self.html_cleaner.clean_html(content))    # todo: 个别html不合规范，lxml解析不了，考虑解决方案
+        data = etree.HTML(self.html_cleaner.clean_html(content))
         sstr = data.xpath('string(.)')
         sstr = re.sub('\s+', ' ', sstr)
+        # print(sstr)
         query_result = self.esm_index.query(sstr)
         if len(query_result) > 0:
             cursor = self.db_conn.cursor()
@@ -155,7 +158,7 @@ class BaseSpider(object):
         self.db_conn.close()
 
 
-class CrawlJob(object):
+class CrawlJob(object):     # todo 单独文件
 
     def __init__(self, url, depth=0, delay=0.1):
         self.url = url

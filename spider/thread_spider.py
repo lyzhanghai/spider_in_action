@@ -41,11 +41,11 @@ class Worker(Thread):
 
 class ThreadSpider(BaseSpider):
 
-    def __init__(self, main_domain=None, domain=[], concurrent=10, max_depth=5,
-                 max_retries=3, delay=1, keyword_list=[], db_name='db2.sqlite'):
+    def __init__(self, main_domain=None, domain=[], concurrency=10, max_depth=5,
+                 max_retries=3, delay=1, keyword_list=[], db_name='db/db.sqlite'):
         super(ThreadSpider, self).__init__(main_domain=main_domain, max_depth=max_depth,
                                            keyword_list=keyword_list, domain=domain, db_name=db_name)
-        self.task_queue = Queue(concurrent)     # 发布任务用
+        self.task_queue = Queue(concurrency)     # 发布任务用
         self.result_queue = Queue()                # 线程返回结果用
         self.session = requests.session()
         self.session.headers = {
@@ -53,7 +53,7 @@ class ThreadSpider(BaseSpider):
         }
         self.delay = delay
         self.max_retries = max_retries
-        for _ in range(concurrent):
+        for _ in range(concurrency):
             Worker(self.task_queue, self.result_queue)
 
     def crawl(self, crawl_job):
@@ -96,14 +96,11 @@ class ThreadSpider(BaseSpider):
                     if cur_depth <= self.max_depth:
                         href_list = self.extract_href_list(crawl_job.text)
                         need_crawl_list = self.deal_href_list(href_list)
-                        # for url in need_crawl_list:
-                        #     crawl_job.next_url.append(url)
-                        # for i, url in enumerate(crawl_job.next_url):
                         for i, url in enumerate(need_crawl_list):
                             if url not in self.queue_set and self.running:
-                                print(i, '^%$', url, cur_depth, len(need_crawl_list), self.task_queue.maxsize)
+                                # print(i, '^%$', url, cur_depth, len(need_crawl_list), self.task_queue.maxsize)
                                 new_job = CrawlJob(url, cur_depth, self.delay)
-                                self.task_queue.put((self.crawl, new_job))      # todo：此处会阻塞存储，考虑使用yield
+                                self.task_queue.put((self.crawl, new_job))
                                 self.queue_set.add(url)
             except Empty as e1:
                 print_exc()
@@ -126,6 +123,6 @@ if __name__ == '__main__':
     target_url = 'http://www.jianshu.com/'
     # target_url = 'http://www.jianshu.com/contact'
     # target_url = 'http://www.jianshu.com/p/dd27230a0d95'
-    ts = ThreadSpider(concurrent=10, delay=1, max_depth=5, keyword_list=['新闻', '兼职', '创业'])
+    ts = ThreadSpider(concurrency=10, delay=1, max_depth=5, keyword_list=['新闻', '兼职', '创业'])
     ts.run(target_url)
     print(time.time() - t1)
