@@ -5,10 +5,17 @@ import time
 import logging
 import signal
 from urlparse import urlparse, urljoin
+import re
+import sqlite3
+import sys
 
 from lxml import etree
-import re
+from lxml.html.clean import Cleaner
 
+
+if sys.version < '3':
+    reload(sys)
+    sys.setdefaultencoding('utf-8')
 
 class BaseSpider(object):
     """
@@ -18,7 +25,7 @@ class BaseSpider(object):
     USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_3) " \
                  "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36"
 
-    def __init__(self, main_domain=None, domain=[], max_depth=5, keyword_list=[]):
+    def __init__(self, main_domain=None, domain=[], max_depth=5, keyword_list=[], db_name='db.sqlite'):
         self.done_set = set()   # 已爬取过的set
         self.queue_set = set()  # 已经入过queue的set
         self.fail_set = set()   # 爬取失败的set
@@ -26,6 +33,10 @@ class BaseSpider(object):
         self.main_domain = main_domain
         self.domain_set = set()
         self.running = True
+        self.db_conn = sqlite3.connect(db_name)
+        self.html_cleaner = Cleaner()
+        self.html_cleaner.javascript = True
+        self.html_cleaner.style = True
         signal.signal(signal.SIGINT, self.handle_sig)
         signal.signal(signal.SIGTERM, self.handle_sig)
         for d in domain:
@@ -86,6 +97,17 @@ class BaseSpider(object):
         data = etree.HTML(html_text)
         return data.xpath('//*/@href')
 
+    def save2db(self, url, content):
+        cursor = self.db_conn.cursor()
+        data = etree.HTML(self.html_cleaner.clean_html(content))
+        sstr = data.xpath('string(.)')
+        sstr = re.sub('\s+', ' ', sstr)
+        # print(sstr)
+        sql = 'insert into content (url, content) values (?, ?)'
+        cursor.execute(sql, (url, sstr))
+        cursor.close()
+        self.db_conn.commit()
+
     def handle_sig(self, signum, frame):
         self.running = False
         logging.error('pid={}, got signal: {}, stopping...'.format(os.getpid(), signum))
@@ -98,14 +120,18 @@ class BaseSpider(object):
         time.sleep(1)
         os.kill(os.getpid(), signal.SIGKILL)
 
+    def close(self):
+        self.db_conn.close()
+
 
 class CrawlJob(object):
 
-    def __init__(self, url, depth=0):
+    def __init__(self, url, depth=0, delay=0.1):
         self.url = url
         self.depth = depth
         self.failed_flag = False
         self.text = ''
         self.failed_num = 0
         self.next_url = []
+        self.delay = delay
 
