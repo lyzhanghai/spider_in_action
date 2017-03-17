@@ -9,6 +9,7 @@ from traceback import print_exc
 from urlparse import urlparse
 import logging
 import datetime
+import traceback
 
 import requests
 
@@ -41,7 +42,7 @@ class Worker(Thread):
 class ThreadSpider(BaseSpider):
 
     def __init__(self, main_domain=None, domain=[], concurrent=10, max_depth=5,
-                 max_retries=3, delay=1, keyword_list=[], db_name='db.sqlite'):
+                 max_retries=3, delay=1, keyword_list=[], db_name='db2.sqlite'):
         super(ThreadSpider, self).__init__(main_domain=main_domain, max_depth=max_depth,
                                            keyword_list=keyword_list, domain=domain, db_name=db_name)
         self.task_queue = Queue(concurrent)     # 发布任务用
@@ -67,13 +68,13 @@ class ThreadSpider(BaseSpider):
         crawl_job.text = resp.text
 
     def run(self, url):
-
-        params = urlparse(target_url)
+        params = urlparse(url)
         d = params.netloc
         if self.main_domain is None:
             self.main_domain = url      # 设置主域名  todo：主域名称呼不对，若一开始初始化将主域名设置为别的，则所有合成的url都将是错的
         self.domain_set.add(d)
         crawl_job = CrawlJob(url, delay=self.delay)
+        self.queue_set.add(url)
         self.task_queue.put((self.crawl, crawl_job))
 
         while self.running:
@@ -85,6 +86,9 @@ class ThreadSpider(BaseSpider):
                         crawl_job.failed_flag = False
                         crawl_job.next_url = []
                         self.task_queue.put((self.crawl, crawl_job))
+                    else:
+                        crawl_job.failed_reason = 'over max retries'
+                        self.deal_failed(crawl_job)
                 else:
                     cur_depth = crawl_job.depth
                     cur_depth += 1
@@ -92,20 +96,27 @@ class ThreadSpider(BaseSpider):
                     if cur_depth <= self.max_depth:
                         href_list = self.extract_href_list(crawl_job.text)
                         need_crawl_list = self.deal_href_list(href_list)
-                        for url in need_crawl_list:
-                            crawl_job.next_url.append(url)
-                        for i, url in enumerate(crawl_job.next_url):
-                            if url not in self.queue_set:
-                                print(i, '^%$', url, cur_depth, len(crawl_job.next_url), self.task_queue.maxsize)
+                        # for url in need_crawl_list:
+                        #     crawl_job.next_url.append(url)
+                        # for i, url in enumerate(crawl_job.next_url):
+                        for i, url in enumerate(need_crawl_list):
+                            if url not in self.queue_set and self.running:
+                                print(i, '^%$', url, cur_depth, len(need_crawl_list), self.task_queue.maxsize)
                                 new_job = CrawlJob(url, cur_depth, self.delay)
                                 self.task_queue.put((self.crawl, new_job))      # todo：此处会阻塞存储，考虑使用yield
                                 self.queue_set.add(url)
-            except Exception as e:
+            except Empty as e1:
                 print_exc()
                 time.sleep(self.delay)
                 if self.task_queue.empty():
                     break
-        self.task_queue.join()
+            except Exception as e:
+                print('abc '*5, crawl_job.url, crawl_job.text)
+                print_exc()
+                crawl_job.failed_reason = traceback.format_exc()
+                self.deal_failed(crawl_job)
+
+        # self.task_queue.join()
         self.close()
 
 
@@ -113,6 +124,8 @@ if __name__ == '__main__':
     import time
     t1 = time.time()
     target_url = 'http://www.jianshu.com/'
-    ts = ThreadSpider(concurrent=10, delay=1, max_depth=1)
+    # target_url = 'http://www.jianshu.com/contact'
+    # target_url = 'http://www.jianshu.com/p/dd27230a0d95'
+    ts = ThreadSpider(concurrent=10, delay=1, max_depth=5, keyword_list=['新闻', '兼职', '创业'])
     ts.run(target_url)
     print(time.time() - t1)

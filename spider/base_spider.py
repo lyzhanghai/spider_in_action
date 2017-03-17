@@ -11,6 +11,7 @@ import sys
 
 from lxml import etree
 from lxml.html.clean import Cleaner
+import esm
 
 
 if sys.version < '3':
@@ -25,7 +26,7 @@ class BaseSpider(object):
     USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_3) " \
                  "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36"
 
-    def __init__(self, main_domain=None, domain=[], max_depth=5, keyword_list=[], db_name='db.sqlite'):
+    def __init__(self, main_domain=None, domain=[], max_depth=5, keyword_list=[], db_name='db2.sqlite'):
         self.done_set = set()   # 已爬取过的set
         self.queue_set = set()  # 已经入过queue的set
         self.fail_set = set()   # 爬取失败的set
@@ -33,10 +34,24 @@ class BaseSpider(object):
         self.main_domain = main_domain
         self.domain_set = set()
         self.running = True
-        self.db_conn = sqlite3.connect(db_name)
         self.html_cleaner = Cleaner()
         self.html_cleaner.javascript = True
         self.html_cleaner.style = True
+        self.esm_index = esm.Index()
+        db_exists = False
+        if os.path.exists(db_name):
+            db_exists = True
+        self.db_conn = sqlite3.connect(db_name)
+        if not db_exists:
+            cursor = self.db_conn.cursor()
+            with open('db/create_table.sql', 'r') as f:
+                for sql in f.read().split(';'):
+                    cursor.execute(sql)
+            cursor.close()
+            self.db_conn.commit()
+        for keyword in keyword_list:
+            self.esm_index.enter(keyword)
+        self.esm_index.fix()
         signal.signal(signal.SIGINT, self.handle_sig)
         signal.signal(signal.SIGTERM, self.handle_sig)
         for d in domain:
@@ -44,10 +59,17 @@ class BaseSpider(object):
 
     def clear_sharp(self, sstr):
         """去掉#号及其右边的内容"""
-        # return sstr
         if sstr.find('#') != -1:
             return sstr[0: sstr.rfind('#')]
         return sstr
+
+    def deal_failed(self, crawl_job):
+        self.fail_set.add(crawl_job.url)
+        cursor = self.db_conn.cursor()
+        sql = 'insert into failed_url (url, content, failed_reason) values (?, ?, ?)'
+        cursor.execute(sql, (crawl_job.url, crawl_job.text, crawl_job.failed_reason.decode('utf-8')))
+        cursor.close()
+        self.db_conn.commit()
 
     def need_crawl(self, href):
         """
@@ -86,7 +108,6 @@ class BaseSpider(object):
             if b:
                 href_list_trans.add(url)
         return href_list_trans
-        # return href_list
 
     def extract_href_list(self, html_text):
         """
@@ -98,15 +119,25 @@ class BaseSpider(object):
         return data.xpath('//*/@href')
 
     def save2db(self, url, content):
-        cursor = self.db_conn.cursor()
-        data = etree.HTML(self.html_cleaner.clean_html(content))
+        data = etree.HTML(self.html_cleaner.clean_html(content))    # todo: 个别html不合规范，lxml解析不了，考虑解决方案
         sstr = data.xpath('string(.)')
         sstr = re.sub('\s+', ' ', sstr)
-        # print(sstr)
-        sql = 'insert into content (url, content) values (?, ?)'
-        cursor.execute(sql, (url, sstr))
-        cursor.close()
-        self.db_conn.commit()
+        query_result = self.esm_index.query(sstr)
+        if len(query_result) > 0:
+            cursor = self.db_conn.cursor()
+            print(sstr)
+            print(query_result)
+            temp_dict ={}
+            for item in query_result:
+                keyword = item[-1].decode('utf-8')
+                temp_dict[keyword] = url    # 用字典去重
+            for k, v in temp_dict.items():
+                sql = 'insert into keyword2url (keyword, url) values (?, ?)'
+                cursor.execute(sql, (k, v))
+            sql = 'insert into content (url, content) values (?, ?)'
+            cursor.execute(sql, (url, sstr))
+            cursor.close()
+            self.db_conn.commit()
 
     def handle_sig(self, signum, frame):
         self.running = False
@@ -132,6 +163,7 @@ class CrawlJob(object):
         self.failed_flag = False
         self.text = ''
         self.failed_num = 0
-        self.next_url = []
+        # self.next_url = []
         self.delay = delay
+        self.failed_reason = ''
 
