@@ -70,11 +70,11 @@ class TornadoSpider(BaseSpider):
                         crawl_job.next_url = []
                         q.put(crawl_job)
                         self.done_set.remove(crawl_job.url)
-                        logger.debug('{} reput to task queue'.format('url'))
+                        logger.debug('{} reput to task queue'.format(crawl_job.url))
                     else:
                         crawl_job.failed_reason = 'over max retries'
                         self.deal_failed(crawl_job)
-                        logger.debug('{} over max retries'.format('url'))
+                        logger.debug('{} over max retries'.format(crawl_job.url))
                 else:
                     cur_depth = crawl_job.depth
                     cur_depth += 1

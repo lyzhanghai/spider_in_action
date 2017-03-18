@@ -1,3 +1,3 @@
 # -*- coding:utf-8 -*-
 
-logger_name = 'dev'
+logger_name = 'product'

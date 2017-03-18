@@ -13,10 +13,14 @@ from lxml import etree
 from lxml.html.clean import Cleaner
 import esm
 
+from setting import logger_name
+
+logger = logging.getLogger(logger_name)
 
 if sys.version < '3':
     reload(sys)
     sys.setdefaultencoding('utf-8')
+
 
 class BaseSpider(object):
     """
@@ -27,9 +31,10 @@ class BaseSpider(object):
                  "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36"
 
     def __init__(self, base_url=None, domain=[], max_depth=5, keyword_list=[], db_name='db/db.sqlite'):
-        self.done_set = set()   # 已爬取过的set
-        self.queue_set = set()  # 已经入过queue的set
-        self.fail_set = set()   # 爬取失败的set
+        self.done_set = set()   # 已爬取过的url集合
+        self.queue_set = set()  # 已经入过queue的url集合
+        self.fail_set = set()   # 爬取失败的url集合
+        self.save2db_set = set()   # 存入数据库的url集合
         self.max_depth = max_depth
         self.base_url = base_url
         self.domain_set = set()
@@ -85,8 +90,6 @@ class BaseSpider(object):
                   str, 合成后的url
         """
         url = href
-        if url in self.done_set:
-            return False, url
         if url.find('javascript:void(') != -1:
             return False, url
         params = urlparse(url)
@@ -140,15 +143,18 @@ class BaseSpider(object):
             cursor.execute(sql, (url, sstr))
             cursor.close()
             self.db_conn.commit()
+            self.save2db_set.add(url)
+            return True
+        return False
 
     def handle_sig(self, signum, frame):
         self.running = False
-        logging.error('pid={}, got signal: {}, stopping...'.format(os.getpid(), signum))
+        logger.error('pid={}, got signal: {}, stopping...'.format(os.getpid(), signum))
         signal.signal(signal.SIGINT, self.handle_sig_force)
         signal.signal(signal.SIGTERM, self.handle_sig_force)
 
     def handle_sig_force(self, signum, frame):
-        logging.error('pid={}, got signal: {} again, forcing exit'.format(os.getpid(), signum))
+        logger.error('pid={}, got signal: {} again, forcing exit'.format(os.getpid(), signum))
         time.sleep(1)
         os.kill(os.getpid(), signal.SIGKILL)
 
