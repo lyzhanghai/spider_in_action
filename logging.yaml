@@ -1,0 +1,57 @@
+---
+
+version: 1
+
+disable_existing_loggers: False
+
+formatters:
+
+    simple:
+
+        format: "%(asctime)s - %(name)s - %(levelname)s - %(process)s - %(thread)d: %(funcName)s - %(message)s"
+
+handlers:
+
+    console:
+
+        class: logging.StreamHandler
+
+        formatter: simple
+
+        stream: ext://sys.stdout
+
+    file:
+
+        class: logging.handlers.TimedRotatingFileHandler
+
+        formatter: simple
+
+        filename: log/spider.log
+
+        when: midnight
+
+        encoding: utf8
+
+loggers:
+
+    dev:
+
+        level: DEBUG
+
+        handlers: [console, file]
+
+        propagate: no
+
+    product:
+
+        level: DEBUG
+
+        handlers: [file]
+
+        propagate: no
+
+root:
+
+    level: DEBUG
+
+    handlers: [console, file]

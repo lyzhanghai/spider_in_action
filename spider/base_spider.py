@@ -26,12 +26,12 @@ class BaseSpider(object):
     USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_3) " \
                  "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36"
 
-    def __init__(self, main_domain=None, domain=[], max_depth=5, keyword_list=[], db_name='db/db.sqlite'):
+    def __init__(self, base_url=None, domain=[], max_depth=5, keyword_list=[], db_name='db/db.sqlite'):
         self.done_set = set()   # 已爬取过的set
         self.queue_set = set()  # 已经入过queue的set
         self.fail_set = set()   # 爬取失败的set
         self.max_depth = max_depth
-        self.main_domain = main_domain
+        self.base_url = base_url
         self.domain_set = set()
         self.running = True
         self.html_cleaner = Cleaner()
@@ -96,7 +96,7 @@ class BaseSpider(object):
         if d != "":
             return True, self.clear_sharp(url)
         else:
-            return True, self.clear_sharp(urljoin(self.main_domain, url))
+            return True, self.clear_sharp(urljoin(self.base_url, url))
 
     def deal_href_list(self, href_list):
         """
@@ -124,13 +124,12 @@ class BaseSpider(object):
         data = etree.HTML(self.html_cleaner.clean_html(content))
         sstr = data.xpath('string(.)')
         sstr = re.sub('\s+', ' ', sstr)
-        # print(sstr)
         query_result = self.esm_index.query(sstr)
         if len(query_result) > 0:
             cursor = self.db_conn.cursor()
-            print(sstr)
-            print(query_result)
-            temp_dict ={}
+            # print(sstr)
+            # print(query_result)
+            temp_dict = {}
             for item in query_result:
                 keyword = item[-1].decode('utf-8')
                 temp_dict[keyword] = url    # 用字典去重
@@ -149,7 +148,6 @@ class BaseSpider(object):
         signal.signal(signal.SIGTERM, self.handle_sig_force)
 
     def handle_sig_force(self, signum, frame):
-        # self.running = False
         logging.error('pid={}, got signal: {} again, forcing exit'.format(os.getpid(), signum))
         time.sleep(1)
         os.kill(os.getpid(), signal.SIGKILL)
@@ -158,7 +156,7 @@ class BaseSpider(object):
         self.db_conn.close()
 
 
-class CrawlJob(object):     # todo 单独文件
+class CrawlJob(object):
 
     def __init__(self, url, depth=0, delay=0.1):
         self.url = url
@@ -166,7 +164,6 @@ class CrawlJob(object):     # todo 单独文件
         self.failed_flag = False
         self.text = ''
         self.failed_num = 0
-        # self.next_url = []
         self.delay = delay
         self.failed_reason = ''
 
