@@ -35,7 +35,7 @@ class BaseSpider(object):
     USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_3) " \
                  "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36"
 
-    def __init__(self, base_url=None, domain=[], max_depth=5, keyword_list=[], db_name='db/db.sqlite'):
+    def __init__(self, base_url=None, domain=[], max_depth=5, keyword_list=[], db_name=None):
         self.done_set = set()   # 已爬取过的url集合
         self.queue_set = set()  # 已经入过queue的url集合
         self.fail_set = set()   # 爬取失败的url集合
@@ -49,16 +49,18 @@ class BaseSpider(object):
         self.html_cleaner.style = True
         self.esm_index = esm.Index()    # 用于在文本中快速查找多个关键词
         db_exists = False
-        if os.path.exists(db_name):     # 判断db是否存在
-            db_exists = True
-        self.db_conn = sqlite3.connect(db_name)
-        if not db_exists:       # db不存在则创建数据库并创建表
-            cursor = self.db_conn.cursor()
-            with open('db/create_table.sql', 'r') as f:
-                for sql in f.read().split(';'):
-                    cursor.execute(sql)
-            cursor.close()
-            self.db_conn.commit()
+        self.db_name = db_name
+        if self.db_name is not None:
+            if os.path.exists(db_name):     # 判断db是否存在
+                db_exists = True
+            self.db_conn = sqlite3.connect(db_name)
+            if not db_exists:       # db不存在则创建数据库并创建表
+                cursor = self.db_conn.cursor()
+                with open('db/create_table.sql', 'r') as f:
+                    for sql in f.read().split(';'):
+                        cursor.execute(sql)
+                cursor.close()
+                self.db_conn.commit()
         for keyword in keyword_list:    # 查询器中添加关键词
             self.esm_index.enter(keyword)
         self.esm_index.fix()    # 变异查询器
@@ -168,7 +170,8 @@ class BaseSpider(object):
 
     def close(self):
         """关闭数据库链接"""
-        self.db_conn.close()
+        if self.db_name is not None:
+            self.db_conn.close()
 
 
 class CrawlJob(object):
