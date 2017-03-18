@@ -25,8 +25,13 @@ class TornadoSpider(BaseSpider):
     def crawl(self, crawl_job):
         try:
             url = crawl_job.url
-            response = yield httpclient.AsyncHTTPClient().fetch(url, request_timeout=10,
-                                                                headers=self.headers)    # todo: session headers
+            # response = yield httpclient.AsyncHTTPClient().fetch(url, request_timeout=10,
+            #                                                     headers=self.headers)
+            request = httpclient.HTTPRequest(url=url, method='GET', headers=self.headers, \
+                                             connect_timeout=4, request_timeout=6, follow_redirects=True)
+
+            response = yield httpclient.AsyncHTTPClient().fetch(request)
+
             # print(type(response.body))
             # todo: 搞清楚python2的编码到底是怎么一回事
             crawl_job.text = response.body.decode('utf-8') if isinstance(response.body, str) \
@@ -38,7 +43,6 @@ class TornadoSpider(BaseSpider):
             traceback.print_exc()
         finally:
             if self.running:
-                print('hahah')
                 yield gen.sleep(self.delay)
 
     @gen.coroutine
@@ -59,11 +63,14 @@ class TornadoSpider(BaseSpider):
                 self.done_set.add(crawl_job.url)
 
                 if crawl_job.failed_flag:
+                    print('haha', crawl_job.url)
                     if crawl_job.failed_num <= self.max_retries:
                         crawl_job.failed_num += 1
                         crawl_job.failed_flag = False
                         crawl_job.next_url = []
                         q.put(crawl_job)
+                        self.done_set.remove(crawl_job.url)
+                        print('haha', crawl_job.url, crawl_job.failed_num)
                     else:
                         crawl_job.failed_reason = 'over max retries'
                         self.deal_failed(crawl_job)
@@ -82,7 +89,7 @@ class TornadoSpider(BaseSpider):
                                 self.queue_set.add(url)
             except Exception as e:
                 print(crawl_job)
-                print('abc '*5, crawl_job.url, crawl_job.text)
+                print('abc ' * 5, crawl_job.url, crawl_job.text)
                 traceback.print_exc()
                 crawl_job.failed_reason = traceback.format_exc()
                 self.deal_failed(crawl_job)
