@@ -1,5 +1,10 @@
 # -*- coding:utf-8 -*-
 
+"""
+爬虫基类
+定义了一些公用的处理方法
+"""
+
 import os
 import time
 import logging
@@ -35,31 +40,31 @@ class BaseSpider(object):
         self.queue_set = set()  # 已经入过queue的url集合
         self.fail_set = set()   # 爬取失败的url集合
         self.save2db_set = set()   # 存入数据库的url集合
-        self.max_depth = max_depth
-        self.base_url = base_url
-        self.domain_set = set()
-        self.running = True
-        self.html_cleaner = Cleaner()
+        self.max_depth = max_depth  # 最大爬行深度
+        self.base_url = base_url    # 用于合成的基本url
+        self.domain_set = set()     # 用于过滤的域名集合
+        self.running = True         # 正在运行标志
+        self.html_cleaner = Cleaner()   # 用于清洗js,css
         self.html_cleaner.javascript = True
         self.html_cleaner.style = True
-        self.esm_index = esm.Index()
+        self.esm_index = esm.Index()    # 用于在文本中快速查找多个关键词
         db_exists = False
-        if os.path.exists(db_name):
+        if os.path.exists(db_name):     # 判断db是否存在
             db_exists = True
         self.db_conn = sqlite3.connect(db_name)
-        if not db_exists:
+        if not db_exists:       # db不存在则创建数据库并创建表
             cursor = self.db_conn.cursor()
             with open('db/create_table.sql', 'r') as f:
                 for sql in f.read().split(';'):
                     cursor.execute(sql)
             cursor.close()
             self.db_conn.commit()
-        for keyword in keyword_list:
+        for keyword in keyword_list:    # 查询器中添加关键词
             self.esm_index.enter(keyword)
-        self.esm_index.fix()
-        signal.signal(signal.SIGINT, self.handle_sig)
+        self.esm_index.fix()    # 变异查询器
+        signal.signal(signal.SIGINT, self.handle_sig)   # 劫持ctrl+c你好
         signal.signal(signal.SIGTERM, self.handle_sig)
-        for d in domain:
+        for d in domain:    # 若有其他需要爬取的域名，在这里加入domain_set
             self.domain_set.add(d)
 
     def clear_sharp(self, sstr):
@@ -69,6 +74,7 @@ class BaseSpider(object):
         return sstr
 
     def deal_failed(self, crawl_job):
+        """将失败信息存入数据库"""
         self.fail_set.add(crawl_job.url)
         cursor = self.db_conn.cursor()
         sql = 'insert into failed_url (url, content, failed_reason) values (?, ?, ?)'
@@ -148,21 +154,27 @@ class BaseSpider(object):
         return False
 
     def handle_sig(self, signum, frame):
+        """第一次ctrl+c处理函数：等待正在运行的任务执行完毕后结束运行"""
         self.running = False
         logger.error('pid={}, got signal: {}, stopping...'.format(os.getpid(), signum))
         signal.signal(signal.SIGINT, self.handle_sig_force)
         signal.signal(signal.SIGTERM, self.handle_sig_force)
 
     def handle_sig_force(self, signum, frame):
+        """第二次ctrl+c处理函数：强制结束所有线程"""
         logger.error('pid={}, got signal: {} again, forcing exit'.format(os.getpid(), signum))
         time.sleep(1)
         os.kill(os.getpid(), signal.SIGKILL)
 
     def close(self):
+        """关闭数据库链接"""
         self.db_conn.close()
 
 
 class CrawlJob(object):
+    """
+    爬行任务，这个类含有一个爬行任务的所有内容
+    """
 
     def __init__(self, url, depth=0, delay=0.1):
         self.url = url
