@@ -77,8 +77,8 @@ class ThreadSpider(BaseSpider):
         crawl_job = CrawlJob(url, delay=self.delay)
         self.queue_set.add(url)
         self.task_queue.put((self.crawl, crawl_job))
-
         logger.info('ThreadSpider crawl start')
+        time.sleep(self.delay)      # 防止接下来没取到结果直接退出
         while self.running:
             try:
                 crawl_job = self.result_queue.get(timeout=self.delay)
